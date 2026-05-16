@@ -223,7 +223,7 @@ const char *tr(const char *en, const char *ja)
 
 const char *langLabel()
 {
-    return (uiLanguage == LANG_JA) ? "JA" : "EN";
+    return (uiLanguage == LANG_JA) ? "日本語" : "EN";
 }
 
 void setUiFontByScale(uint8_t enScale)
