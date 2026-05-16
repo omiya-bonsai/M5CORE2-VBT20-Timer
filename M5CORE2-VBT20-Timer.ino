@@ -110,6 +110,35 @@ void beep(uint16_t freq, uint16_t ms)
 #endif
 }
 
+void vibratePulse(uint16_t ms, uint8_t level = VIBRATION_LEVEL)
+{
+#if USE_VIBRATION
+    if (!soundEnabled)
+        return;
+
+    M5.Power.setVibration(level);
+    delay(ms);
+    M5.Power.setVibration(0);
+#endif
+}
+
+void vibratePattern(uint8_t count, uint16_t onMs)
+{
+#if USE_VIBRATION
+    if (!soundEnabled)
+        return;
+
+    for (uint8_t i = 0; i < count; i++)
+    {
+        vibratePulse(onMs);
+        if (i + 1 < count)
+        {
+            delay(VIB_GAP_MS);
+        }
+    }
+#endif
+}
+
 void resetTimer()
 {
     timerState = TIMER_READY;
@@ -175,14 +204,24 @@ void handleButtons()
     // Core2: A=-1分 / B=開始・停止 / C=+1分
     if (M5.BtnA.wasPressed())
     {
+        uint32_t before = durationSec;
         adjustMinutes(-1);
-        beep(1800, 25);
+        if (durationSec != before)
+        {
+            beep(1800, 25);
+            vibratePattern(1, VIB_SHORT_MS);
+        }
     }
 
     if (M5.BtnC.wasPressed())
     {
+        uint32_t before = durationSec;
         adjustMinutes(1);
-        beep(2200, 25);
+        if (durationSec != before)
+        {
+            beep(2200, 25);
+            vibratePattern(1, VIB_SHORT_MS);
+        }
     }
 
     if (M5.BtnB.wasPressed())
@@ -255,11 +294,66 @@ void handleImuMinuteAdjust()
     delta = -delta;
 #endif
 
+    uint32_t before = durationSec;
     adjustMinutes(delta);
-    beep((delta > 0) ? 2200 : 1800, 25);
+    if (durationSec != before)
+    {
+        beep((delta > 0) ? 2200 : 1800, 25);
+        vibratePattern(1, VIB_SHORT_MS);
+    }
 
     imuTiltArmed = false;
     lastImuAdjustMs = now;
+#endif
+}
+
+void handleTouchMinuteAdjust()
+{
+#if USE_TOUCH_MINUTE_ADJUST
+    if (uiMode == UI_SETTINGS)
+        return;
+
+    if (timerState == TIMER_RUNNING)
+        return;
+
+    if (!M5.Touch.isEnabled() || M5.Touch.getCount() == 0)
+        return;
+
+    auto td = M5.Touch.getDetail();
+    int delta = 0;
+
+    if (td.wasFlicked())
+    {
+        int dx = td.distanceX();
+        int dy = td.distanceY();
+        if (abs(dx) >= TOUCH_SWIPE_THRESHOLD_PX && abs(dx) > abs(dy))
+        {
+            delta = (dx > 0) ? 1 : -1;
+        }
+    }
+    else if (td.wasClicked())
+    {
+        int centerX = SCREEN_WIDTH / 2;
+        if (td.x <= centerX - TOUCH_TAP_CENTER_DEADZONE_PX)
+        {
+            delta = -1;
+        }
+        else if (td.x >= centerX + TOUCH_TAP_CENTER_DEADZONE_PX)
+        {
+            delta = 1;
+        }
+    }
+
+    if (delta == 0)
+        return;
+
+    uint32_t before = durationSec;
+    adjustMinutes(delta);
+    if (durationSec != before)
+    {
+        beep((delta > 0) ? 2200 : 1800, 25);
+        vibratePattern(1, VIB_SHORT_MS);
+    }
 #endif
 }
 
@@ -283,6 +377,7 @@ void updateTimer()
         {
             halfNotified = true;
             beep(2000, 120);
+            vibratePattern(2, VIB_MEDIUM_MS);
         }
 
         if (remainingSec == 0)
@@ -291,6 +386,7 @@ void updateTimer()
             for (int i = 0; i < 3; i++)
             {
                 beep(2600, 120);
+                vibratePattern(1, VIB_LONG_MS);
                 delay(140);
             }
         }
@@ -440,9 +536,11 @@ void drawHelp()
     else if (timerState == TIMER_READY)
     {
 #if USE_IMU_MINUTE_ADJUST
-        canvas.drawString("A:-1 B:start C:+1 tilt:+/-1 holdB:settings", SCREEN_WIDTH / 2, 222);
+        canvas.drawString("A:-1 C:+1 tap/swipe:+/-1 tilt:+/-1", SCREEN_WIDTH / 2, 214);
+        canvas.drawString("B:start   holdB:settings", SCREEN_WIDTH / 2, 226);
 #else
-        canvas.drawString("A:-1min B:start C:+1min holdB:settings", SCREEN_WIDTH / 2, 222);
+        canvas.drawString("A:-1 C:+1 tap/swipe:+/-1", SCREEN_WIDTH / 2, 214);
+        canvas.drawString("B:start   holdB:settings", SCREEN_WIDTH / 2, 226);
 #endif
     }
     else if (timerState == TIMER_RUNNING)
@@ -527,6 +625,7 @@ void loop()
     M5.update();
 
     handleButtons();
+    handleTouchMinuteAdjust();
     handleImuMinuteAdjust();
     updateTimer();
 
