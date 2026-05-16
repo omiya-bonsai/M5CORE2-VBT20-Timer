@@ -58,6 +58,18 @@ uint32_t lastImuAdjustMs = 0;
 uint32_t lastHoldAdjustMsA = 0;
 uint32_t lastHoldAdjustMsC = 0;
 
+bool qrOverlayActive = false;
+uint32_t qrOverlayStartMs = 0;
+UiMode qrOverlayPrevUiMode = UI_TIMER;
+uint8_t bSecretTapCount = 0;
+uint32_t bSecretLastTapMs = 0;
+
+static constexpr uint8_t SECRET_B_TAP_MIN = 5;
+static constexpr uint8_t SECRET_B_TAP_MAX = 9;
+static constexpr uint32_t SECRET_B_TAP_GAP_MS = 700;
+static constexpr uint32_t QR_OVERLAY_DURATION_MS = 10000;
+static constexpr const char *REPO_URL = "https://github.com/omiya-bonsai/M5CORE2-VBT20-Timer";
+
 uint16_t colorBg, colorText, colorDim;
 uint16_t colorReady, colorRun, colorPause, colorDone;
 
@@ -323,6 +335,51 @@ void adjustMinutesWithFeedback(int delta)
 void cycleNotificationMode()
 {
     notificationMode = (NotificationMode)((notificationMode + 1) % NOTIFY_MODE_COUNT);
+}
+
+void updateSecretQrTrigger()
+{
+    if (qrOverlayActive)
+        return;
+
+    if (!M5.BtnB.wasPressed())
+        return;
+
+    uint32_t now = millis();
+    if (now - bSecretLastTapMs > SECRET_B_TAP_GAP_MS)
+    {
+        bSecretTapCount = 0;
+    }
+
+    bSecretLastTapMs = now;
+    if (bSecretTapCount < SECRET_B_TAP_MAX)
+    {
+        bSecretTapCount++;
+    }
+    else
+    {
+        bSecretTapCount = 1;
+    }
+
+    if (bSecretTapCount >= SECRET_B_TAP_MIN && bSecretTapCount <= SECRET_B_TAP_MAX)
+    {
+        qrOverlayActive = true;
+        qrOverlayStartMs = now;
+        qrOverlayPrevUiMode = uiMode;
+        bSecretTapCount = 0;
+    }
+}
+
+void updateQrOverlayState()
+{
+    if (!qrOverlayActive)
+        return;
+
+    if (millis() - qrOverlayStartMs >= QR_OVERLAY_DURATION_MS)
+    {
+        qrOverlayActive = false;
+        uiMode = qrOverlayPrevUiMode;
+    }
 }
 
 bool isTouchClicked()
@@ -862,6 +919,30 @@ void drawDisplay()
 
     canvas.fillScreen(colorBg);
 
+    if (qrOverlayActive)
+    {
+        uint16_t qrBg = M5.Display.color565(8, 8, 8);
+        canvas.fillScreen(qrBg);
+
+        int qrSize = 170;
+        int qrX = (SCREEN_WIDTH - qrSize) / 2;
+        int qrY = 34;
+        canvas.qrcode(REPO_URL, qrX, qrY, qrSize, 6);
+
+        setUiFontByScale(1);
+        canvas.setTextDatum(top_center);
+        canvas.setTextColor(colorText, qrBg);
+        canvas.drawString(tr("Repository URL", "リポジトリURL"), SCREEN_WIDTH / 2, 10);
+
+        canvas.setTextColor(colorDim, qrBg);
+        uint32_t remainMs = QR_OVERLAY_DURATION_MS - min((uint32_t)QR_OVERLAY_DURATION_MS, millis() - qrOverlayStartMs);
+        canvas.drawString(String(tr("back in ", "戻るまで ")) + String((remainMs + 999) / 1000) + tr(" sec", " 秒"), SCREEN_WIDTH / 2, 214);
+
+        canvas.pushSprite(0, 0);
+        colorBg = savedBg;
+        return;
+    }
+
     if (uiMode == UI_SETTINGS)
     {
         drawBarSegments();
@@ -909,9 +990,15 @@ void loop()
 {
     M5.update();
 
-    handleButtons();
-    handleTouchMinuteAdjust();
-    handleImuMinuteAdjust();
+    updateSecretQrTrigger();
+    updateQrOverlayState();
+
+    if (!qrOverlayActive)
+    {
+        handleButtons();
+        handleTouchMinuteAdjust();
+        handleImuMinuteAdjust();
+    }
     updateTimer();
 
     uint32_t now = millis();
