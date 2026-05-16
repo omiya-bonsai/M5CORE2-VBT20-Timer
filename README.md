@@ -87,6 +87,7 @@ Copy and edit local config:
 Key parameters include:
 
 - Display and brightness
+- Idle power save timing
 - Segment count/thickness/gap
 - Rainbow color steps
 - Blink interval
@@ -99,6 +100,7 @@ Key parameters include:
 
 - This project intentionally avoids cloud/mobile dependencies.
 - Design goal: quiet, simple, reliable daily use.
+- When the timer is Ready and left unused, the display dims after 3 minutes, sleeps after 6 minutes, and powers off after 9 minutes by default.
 
 ## License
 

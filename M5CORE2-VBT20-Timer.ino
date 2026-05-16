@@ -39,6 +39,13 @@ enum SettingsItem
     SETTING_ITEM_COUNT
 };
 
+enum PowerSaveState
+{
+    POWER_SAVE_NORMAL,
+    POWER_SAVE_DIMMED,
+    POWER_SAVE_DISPLAY_SLEEP
+};
+
 M5Canvas canvas(&M5.Display);
 
 TimerState timerState = TIMER_READY;
@@ -46,11 +53,13 @@ UiMode uiMode = UI_TIMER;
 NotificationMode notificationMode = NOTIFY_LOUD;
 UiLanguage uiLanguage = UI_LANGUAGE_DEFAULT_JA ? LANG_JA : LANG_EN;
 uint8_t settingsCursor = SETTING_NOTIFY_MODE;
+PowerSaveState powerSaveState = POWER_SAVE_NORMAL;
 
 uint32_t durationSec = DEFAULT_TIMER_MINUTES * 60;
 uint32_t remainingSec = durationSec;
 uint32_t lastTickMs = 0;
 uint32_t lastDrawMs = 0;
+uint32_t lastUserActivityMs = 0;
 
 bool halfNotified = false;
 bool imuTiltArmed = true;
@@ -72,6 +81,102 @@ static constexpr const char *REPO_URL = "https://github.com/omiya-bonsai/M5CORE2
 
 uint16_t colorBg, colorText, colorDim;
 uint16_t colorReady, colorRun, colorPause, colorDone;
+
+uint8_t dimmedDisplayBrightness()
+{
+    uint16_t brightness = (uint16_t)DISPLAY_BRIGHTNESS * POWER_SAVE_DIM_PERCENT / 100;
+    if (DISPLAY_BRIGHTNESS > 0 && brightness == 0)
+    {
+        brightness = 1;
+    }
+    return (uint8_t)min<uint16_t>(brightness, 255);
+}
+
+void setPowerSaveState(PowerSaveState nextState)
+{
+    if (powerSaveState == nextState)
+        return;
+
+    powerSaveState = nextState;
+
+    if (powerSaveState == POWER_SAVE_NORMAL)
+    {
+        M5.Display.wakeup();
+        M5.Display.setBrightness(DISPLAY_BRIGHTNESS);
+        lastDrawMs = 0;
+    }
+    else if (powerSaveState == POWER_SAVE_DIMMED)
+    {
+        M5.Display.wakeup();
+        M5.Display.setBrightness(dimmedDisplayBrightness());
+        lastDrawMs = 0;
+    }
+    else if (powerSaveState == POWER_SAVE_DISPLAY_SLEEP)
+    {
+        M5.Display.setBrightness(0);
+        M5.Display.sleep();
+    }
+}
+
+void noteUserActivity()
+{
+    lastUserActivityMs = millis();
+    setPowerSaveState(POWER_SAVE_NORMAL);
+}
+
+bool hasUserInputActivity()
+{
+    if (M5.BtnA.isPressed() || M5.BtnA.wasPressed() || M5.BtnA.wasReleased())
+        return true;
+    if (M5.BtnB.isPressed() || M5.BtnB.wasPressed() || M5.BtnB.wasReleased())
+        return true;
+    if (M5.BtnC.isPressed() || M5.BtnC.wasPressed() || M5.BtnC.wasReleased())
+        return true;
+
+    if (M5.Touch.isEnabled())
+    {
+        auto td = M5.Touch.getDetail();
+        if (td.isPressed() || td.wasPressed() || td.wasReleased() || td.wasClicked() || td.wasFlicked() || td.wasDragged())
+            return true;
+    }
+
+    return false;
+}
+
+bool isPowerSaveEligible()
+{
+    return POWER_SAVE_ENABLED && timerState == TIMER_READY && !qrOverlayActive;
+}
+
+void updatePowerSave()
+{
+    if (!isPowerSaveEligible())
+    {
+        lastUserActivityMs = millis();
+        setPowerSaveState(POWER_SAVE_NORMAL);
+        return;
+    }
+
+    uint32_t idleMs = millis() - lastUserActivityMs;
+    if (idleMs >= POWER_SAVE_POWER_OFF_AFTER_MS)
+    {
+        M5.Power.powerOff();
+        return;
+    }
+
+    if (idleMs >= POWER_SAVE_SLEEP_AFTER_MS)
+    {
+        setPowerSaveState(POWER_SAVE_DISPLAY_SLEEP);
+    }
+    else if (idleMs >= POWER_SAVE_DIM_AFTER_MS)
+    {
+        setPowerSaveState(POWER_SAVE_DIMMED);
+    }
+    else
+    {
+        setPowerSaveState(POWER_SAVE_NORMAL);
+    }
+}
 
 const char *notifyModeLabel()
 {
@@ -327,6 +432,7 @@ void adjustMinutesWithFeedback(int delta)
     adjustMinutes(delta);
     if (durationSec != before)
     {
+        noteUserActivity();
         beep((delta > 0) ? 2200 : 1800, 25);
         vibratePattern(1, VIB_SHORT_MS);
     }
@@ -367,6 +473,7 @@ void updateSecretQrTrigger()
         qrOverlayStartMs = now;
         qrOverlayPrevUiMode = uiMode;
         bSecretTapCount = 0;
+        noteUserActivity();
     }
 }
 
@@ -434,12 +541,14 @@ void handleButtons()
         if (M5.BtnA.wasPressed())
         {
             settingsCursor = (settingsCursor + SETTING_ITEM_COUNT - 1) % SETTING_ITEM_COUNT;
+            noteUserActivity();
             beep(1800, 25);
         }
 
         if (M5.BtnC.wasPressed())
         {
             settingsCursor = (settingsCursor + 1) % SETTING_ITEM_COUNT;
+            noteUserActivity();
             beep(2200, 25);
         }
 
@@ -454,6 +563,7 @@ void handleButtons()
                 uiLanguage = (UiLanguage)((uiLanguage + 1) % LANG_COUNT);
             }
 
+            noteUserActivity();
             beep(2100, 35);
             vibratePattern(1, VIB_SHORT_MS);
         }
@@ -461,6 +571,7 @@ void handleButtons()
         if (M5.BtnB.wasPressed())
         {
             uiMode = UI_TIMER;
+            noteUserActivity();
             beep(2000, 40);
         }
         return;
@@ -469,6 +580,7 @@ void handleButtons()
     if (timerState == TIMER_READY && M5.BtnB.pressedFor(SETTINGS_LONG_PRESS_MS))
     {
         uiMode = UI_SETTINGS;
+        noteUserActivity();
         beep(1800, 60);
         delay(350);
         return;
@@ -516,22 +628,26 @@ void handleButtons()
         {
             timerState = TIMER_RUNNING;
             lastTickMs = millis();
+            noteUserActivity();
             beep(2600, 70);
         }
         else if (timerState == TIMER_RUNNING)
         {
             timerState = TIMER_PAUSED;
+            noteUserActivity();
             beep(1800, 50);
         }
         else if (timerState == TIMER_PAUSED)
         {
             timerState = TIMER_RUNNING;
             lastTickMs = millis();
+            noteUserActivity();
             beep(2600, 50);
         }
         else if (timerState == TIMER_DONE)
         {
             resetTimer();
+            noteUserActivity();
             beep(2200, 100);
         }
     }
@@ -539,6 +655,7 @@ void handleButtons()
     if (timerState != TIMER_READY && M5.BtnB.pressedFor(LONG_PRESS_RESET_MS))
     {
         resetTimer();
+        noteUserActivity();
         beep(1200, 120);
         delay(500);
     }
@@ -584,6 +701,7 @@ void handleImuMinuteAdjust()
     adjustMinutes(delta);
     if (durationSec != before)
     {
+        noteUserActivity();
         beep((delta > 0) ? 2200 : 1800, 25);
         vibratePattern(1, VIB_SHORT_MS);
     }
@@ -637,6 +755,7 @@ void handleTouchMinuteAdjust()
     adjustMinutes(delta);
     if (durationSec != before)
     {
+        noteUserActivity();
         beep((delta > 0) ? 2200 : 1800, 25);
         vibratePattern(1, VIB_SHORT_MS);
     }
@@ -982,6 +1101,7 @@ void setup()
     colorPause = M5.Display.color565(255, 190, 60);
     colorDone = M5.Display.color565(255, 70, 50);
 
+    lastUserActivityMs = millis();
     resetTimer();
     drawDisplay();
 }
@@ -989,6 +1109,11 @@ void setup()
 void loop()
 {
     M5.update();
+
+    if (hasUserInputActivity())
+    {
+        noteUserActivity();
+    }
 
     updateSecretQrTrigger();
     updateQrOverlayState();
@@ -1000,9 +1125,10 @@ void loop()
         handleImuMinuteAdjust();
     }
     updateTimer();
+    updatePowerSave();
 
     uint32_t now = millis();
-    if (now - lastDrawMs >= DRAW_INTERVAL_MS)
+    if (powerSaveState != POWER_SAVE_DISPLAY_SLEEP && now - lastDrawMs >= DRAW_INTERVAL_MS)
     {
         lastDrawMs = now;
         drawDisplay();
