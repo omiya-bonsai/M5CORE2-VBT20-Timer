@@ -19,8 +19,9 @@ enum NotificationMode
 {
     NOTIFY_LOUD,
     NOTIFY_SOFT,
-    NOTIFY_SILENT,
     NOTIFY_VIBRATE,
+    NOTIFY_LIBRARY,
+    NOTIFY_SILENT,
     NOTIFY_MODE_COUNT
 };
 
@@ -33,8 +34,6 @@ enum UiLanguage
 
 enum SettingsItem
 {
-    SETTING_SOUND,
-    SETTING_VIBRATION,
     SETTING_NOTIFY_MODE,
     SETTING_LANGUAGE,
     SETTING_ITEM_COUNT
@@ -46,7 +45,7 @@ TimerState timerState = TIMER_READY;
 UiMode uiMode = UI_TIMER;
 NotificationMode notificationMode = NOTIFY_LOUD;
 UiLanguage uiLanguage = UI_LANGUAGE_DEFAULT_JA ? LANG_JA : LANG_EN;
-uint8_t settingsCursor = SETTING_SOUND;
+uint8_t settingsCursor = SETTING_NOTIFY_MODE;
 
 uint32_t durationSec = DEFAULT_TIMER_MINUTES * 60;
 uint32_t remainingSec = durationSec;
@@ -58,8 +57,6 @@ bool imuTiltArmed = true;
 uint32_t lastImuAdjustMs = 0;
 uint32_t lastHoldAdjustMsA = 0;
 uint32_t lastHoldAdjustMsC = 0;
-bool soundEnabled = SOUND_ENABLED_DEFAULT;
-bool vibrationEnabled = VIBRATION_ENABLED_DEFAULT;
 
 uint16_t colorBg, colorText, colorDim;
 uint16_t colorReady, colorRun, colorPause, colorDone;
@@ -73,11 +70,13 @@ const char *notifyModeLabel()
         case NOTIFY_LOUD:
             return "大きめ";
         case NOTIFY_SOFT:
-            return "やさしめ";
+            return "小さめ";
+        case NOTIFY_VIBRATE:
+            return "バイブレーション";
+        case NOTIFY_LIBRARY:
+            return "図書館";
         case NOTIFY_SILENT:
             return "消音";
-        case NOTIFY_VIBRATE:
-            return "バイブ";
         default:
             return "大きめ";
         }
@@ -89,10 +88,12 @@ const char *notifyModeLabel()
         return "LOUD";
     case NOTIFY_SOFT:
         return "SOFT";
-    case NOTIFY_SILENT:
-        return "SILENT";
     case NOTIFY_VIBRATE:
         return "VIBRATE";
+    case NOTIFY_LIBRARY:
+        return "LIBRARY";
+    case NOTIFY_SILENT:
+        return "SILENT";
     default:
         return "LOUD";
     }
@@ -141,16 +142,12 @@ void setNumericFont(uint8_t scale)
 
 bool isSoundNotifyEnabled()
 {
-    if (!soundEnabled)
-        return false;
     return notificationMode == NOTIFY_LOUD || notificationMode == NOTIFY_SOFT;
 }
 
 bool isVibrationNotifyEnabled()
 {
-    if (!vibrationEnabled)
-        return false;
-    return notificationMode == NOTIFY_LOUD || notificationMode == NOTIFY_SOFT || notificationMode == NOTIFY_VIBRATE;
+    return notificationMode == NOTIFY_LOUD || notificationMode == NOTIFY_SOFT || notificationMode == NOTIFY_VIBRATE || notificationMode == NOTIFY_LIBRARY;
 }
 
 uint16_t hsvTo565(float h, float s, float v)
@@ -248,6 +245,10 @@ void vibratePulse(uint16_t ms, uint8_t level = VIBRATION_LEVEL)
     {
         adjustedLevel = (uint8_t)(level * 0.6f);
     }
+    else if (notificationMode == NOTIFY_LIBRARY)
+    {
+        adjustedLevel = (uint8_t)(level * 0.4f);
+    }
 
     M5.Power.setVibration(adjustedLevel);
     delay(ms);
@@ -338,7 +339,7 @@ void notifyHalfTime()
         beep(2000, 90);
         vibratePattern(1, VIB_SHORT_MS);
     }
-    else if (notificationMode == NOTIFY_VIBRATE)
+    else if (notificationMode == NOTIFY_VIBRATE || notificationMode == NOTIFY_LIBRARY)
     {
         vibratePattern(1, VIB_SHORT_MS);
     }
@@ -355,7 +356,15 @@ void notifyTimeUp()
         }
     }
 
-    if (notificationMode == NOTIFY_LOUD || notificationMode == NOTIFY_SOFT || notificationMode == NOTIFY_VIBRATE)
+    if (notificationMode == NOTIFY_VIBRATE)
+    {
+        vibratePattern(3, VIB_MEDIUM_MS);
+    }
+    else if (notificationMode == NOTIFY_LIBRARY)
+    {
+        vibratePattern(2, VIB_SHORT_MS);
+    }
+    else if (notificationMode == NOTIFY_LOUD || notificationMode == NOTIFY_SOFT)
     {
         vibratePattern(3, VIB_MEDIUM_MS);
     }
@@ -379,15 +388,7 @@ void handleButtons()
 
         if (isTouchClicked())
         {
-            if (settingsCursor == SETTING_SOUND)
-            {
-                soundEnabled = !soundEnabled;
-            }
-            else if (settingsCursor == SETTING_VIBRATION)
-            {
-                vibrationEnabled = !vibrationEnabled;
-            }
-            else if (settingsCursor == SETTING_NOTIFY_MODE)
+            if (settingsCursor == SETTING_NOTIFY_MODE)
             {
                 cycleNotificationMode();
             }
@@ -840,21 +841,15 @@ void drawSettings()
     canvas.drawString(tr("SETTINGS", "設定"), SCREEN_WIDTH / 2, 44);
 
     setUiFontByScale(2);
-    canvas.setTextColor((settingsCursor == SETTING_SOUND) ? colorRun : colorText, colorBg);
-    canvas.drawString(String((settingsCursor == SETTING_SOUND) ? "> " : "  ") + tr("SOUND: ", "音: ") + (soundEnabled ? "ON" : "OFF"), SCREEN_WIDTH / 2, 84);
-
-    canvas.setTextColor((settingsCursor == SETTING_VIBRATION) ? colorRun : colorText, colorBg);
-    canvas.drawString(String((settingsCursor == SETTING_VIBRATION) ? "> " : "  ") + tr("VIBE: ", "振動: ") + (vibrationEnabled ? "ON" : "OFF"), SCREEN_WIDTH / 2, 110);
-
     canvas.setTextColor((settingsCursor == SETTING_NOTIFY_MODE) ? colorRun : colorText, colorBg);
-    canvas.drawString(String((settingsCursor == SETTING_NOTIFY_MODE) ? "> " : "  ") + tr("MODE: ", "通知: ") + notifyModeLabel(), SCREEN_WIDTH / 2, 136);
+    canvas.drawString(String((settingsCursor == SETTING_NOTIFY_MODE) ? "> " : "  ") + tr("MODE: ", "通知: ") + notifyModeLabel(), SCREEN_WIDTH / 2, 102);
 
     canvas.setTextColor((settingsCursor == SETTING_LANGUAGE) ? colorRun : colorText, colorBg);
-    canvas.drawString(String((settingsCursor == SETTING_LANGUAGE) ? "> " : "  ") + tr("LANG: ", "言語: ") + langLabel(), SCREEN_WIDTH / 2, 162);
+    canvas.drawString(String((settingsCursor == SETTING_LANGUAGE) ? "> " : "  ") + tr("LANG: ", "言語: ") + langLabel(), SCREEN_WIDTH / 2, 132);
 
     setUiFontByScale(1);
     canvas.setTextColor(colorDim, colorBg);
-    canvas.drawString(tr("A/C item  tap change  B back", "A/C項目  タップ変更  B戻る"), SCREEN_WIDTH / 2, 188);
+    canvas.drawString(tr("A/C item  tap change  B back", "A/C項目  タップ変更  B戻る"), SCREEN_WIDTH / 2, 174);
 }
 
 void drawDisplay()
