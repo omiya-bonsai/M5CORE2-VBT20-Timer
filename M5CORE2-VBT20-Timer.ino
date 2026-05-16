@@ -145,7 +145,7 @@ bool hasUserInputActivity()
 
 bool isPowerSaveEligible()
 {
-    return POWER_SAVE_ENABLED && timerState == TIMER_READY && !qrOverlayActive;
+    return POWER_SAVE_ENABLED && (timerState == TIMER_READY || timerState == TIMER_PAUSED) && !qrOverlayActive;
 }
 
 void updatePowerSave()
