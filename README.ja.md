@@ -20,9 +20,12 @@ M5Stack Core2 で動作する、VBT20風ビジュアルタイマーです。
 - 通知モード:
 	- Loud
 	- Soft
-	- Silent
 	- Vibrate
-- 設定画面で音ON/OFF・振動ON/OFFを切替
+	- Library
+	- Silent
+- 通知はモードで一元管理（音/振動の個別トグルなし）
+- 設定画面で言語切替（EN/JA）
+- メイン画面にバッテリー残量表示
 - 半分到達通知
 - 終盤演出（暖色化・緩やかなアニメーション）
 - 終了時の穏やかな画面フラッシュ通知
@@ -58,9 +61,8 @@ M5Stack Core2 で動作する、VBT20風ビジュアルタイマーです。
 
 設定項目:
 
-- SOUND: ON/OFF
-- VIBE: ON/OFF
-- MODE: Loud / Soft / Silent / Vibrate
+- MODE: Loud / Soft / Vibrate / Library / Silent
+- LANG: EN / JA
 
 ## 開発環境
 
@@ -96,3 +98,8 @@ M5Stack Core2 で動作する、VBT20風ビジュアルタイマーです。
 
 - 本プロジェクトはクラウド/スマホ連携を前提にしていません。
 - 毎日使う実用品として、静かさ・分かりやすさ・安定性を重視しています。
+
+## ライセンス
+
+本プロジェクトは MIT License で提供されています。
+詳細は [LICENSE](LICENSE) を参照してください。

@@ -19,9 +19,12 @@ This project focuses on quiet, intuitive operation for study environments such a
 - Notification modes:
 	- Loud
 	- Soft
-	- Silent
 	- Vibrate
-- Sound ON/OFF and vibration ON/OFF in settings
+	- Library
+	- Silent
+- Mode-driven notification behavior (no separate SOUND/VIBE toggles)
+- UI language switch (EN/JA) in settings
+- Battery level display on main screen
 - Half-time notification
 - Endgame visual cues:
 	- Warm tint near the end
@@ -59,9 +62,8 @@ This project focuses on quiet, intuitive operation for study environments such a
 
 Settings items:
 
-- SOUND: ON/OFF
-- VIBE: ON/OFF
-- MODE: Loud / Soft / Silent / Vibrate
+- MODE: Loud / Soft / Vibrate / Library / Silent
+- LANG: EN / JA
 
 ## Build Environment
 
@@ -97,3 +99,8 @@ Key parameters include:
 
 - This project intentionally avoids cloud/mobile dependencies.
 - Design goal: quiet, simple, reliable daily use.
+
+## License
+
+This project is licensed under the MIT License.
+See [LICENSE](LICENSE).
