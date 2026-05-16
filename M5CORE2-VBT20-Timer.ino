@@ -15,10 +15,29 @@ enum UiMode
     UI_SETTINGS
 };
 
+enum NotificationMode
+{
+    NOTIFY_LOUD,
+    NOTIFY_SOFT,
+    NOTIFY_SILENT,
+    NOTIFY_VIBRATE,
+    NOTIFY_MODE_COUNT
+};
+
+enum SettingsItem
+{
+    SETTING_SOUND,
+    SETTING_VIBRATION,
+    SETTING_NOTIFY_MODE,
+    SETTING_ITEM_COUNT
+};
+
 M5Canvas canvas(&M5.Display);
 
 TimerState timerState = TIMER_READY;
 UiMode uiMode = UI_TIMER;
+NotificationMode notificationMode = NOTIFY_LOUD;
+uint8_t settingsCursor = SETTING_SOUND;
 
 uint32_t durationSec = DEFAULT_TIMER_MINUTES * 60;
 uint32_t remainingSec = durationSec;
@@ -28,10 +47,44 @@ uint32_t lastDrawMs = 0;
 bool halfNotified = false;
 bool imuTiltArmed = true;
 uint32_t lastImuAdjustMs = 0;
+uint32_t lastHoldAdjustMsA = 0;
+uint32_t lastHoldAdjustMsC = 0;
 bool soundEnabled = SOUND_ENABLED_DEFAULT;
+bool vibrationEnabled = VIBRATION_ENABLED_DEFAULT;
 
 uint16_t colorBg, colorText, colorDim;
 uint16_t colorReady, colorRun, colorPause, colorDone;
+
+const char *notifyModeLabel()
+{
+    switch (notificationMode)
+    {
+    case NOTIFY_LOUD:
+        return "LOUD";
+    case NOTIFY_SOFT:
+        return "SOFT";
+    case NOTIFY_SILENT:
+        return "SILENT";
+    case NOTIFY_VIBRATE:
+        return "VIBRATE";
+    default:
+        return "LOUD";
+    }
+}
+
+bool isSoundNotifyEnabled()
+{
+    if (!soundEnabled)
+        return false;
+    return notificationMode == NOTIFY_LOUD || notificationMode == NOTIFY_SOFT;
+}
+
+bool isVibrationNotifyEnabled()
+{
+    if (!vibrationEnabled)
+        return false;
+    return notificationMode == NOTIFY_LOUD || notificationMode == NOTIFY_SOFT || notificationMode == NOTIFY_VIBRATE;
+}
 
 uint16_t hsvTo565(float h, float s, float v)
 {
@@ -103,9 +156,16 @@ uint16_t rainbowColorByIndex(int index, int total)
 void beep(uint16_t freq, uint16_t ms)
 {
 #if USE_SPEAKER
-    if (soundEnabled)
+    if (isSoundNotifyEnabled())
     {
-        M5.Speaker.tone(freq, ms);
+        uint16_t adjustedFreq = freq;
+        uint16_t adjustedMs = ms;
+        if (notificationMode == NOTIFY_SOFT)
+        {
+            adjustedFreq = (uint16_t)(freq * 0.85f);
+            adjustedMs = max((uint16_t)20, (uint16_t)(ms * 0.55f));
+        }
+        M5.Speaker.tone(adjustedFreq, adjustedMs);
     }
 #endif
 }
@@ -113,10 +173,16 @@ void beep(uint16_t freq, uint16_t ms)
 void vibratePulse(uint16_t ms, uint8_t level = VIBRATION_LEVEL)
 {
 #if USE_VIBRATION
-    if (!soundEnabled)
+    if (!isVibrationNotifyEnabled())
         return;
 
-    M5.Power.setVibration(level);
+    uint8_t adjustedLevel = level;
+    if (notificationMode == NOTIFY_SOFT)
+    {
+        adjustedLevel = (uint8_t)(level * 0.6f);
+    }
+
+    M5.Power.setVibration(adjustedLevel);
     delay(ms);
     M5.Power.setVibration(0);
 #endif
@@ -125,7 +191,7 @@ void vibratePulse(uint16_t ms, uint8_t level = VIBRATION_LEVEL)
 void vibratePattern(uint8_t count, uint16_t onMs)
 {
 #if USE_VIBRATION
-    if (!soundEnabled)
+    if (!isVibrationNotifyEnabled())
         return;
 
     for (uint8_t i = 0; i < count; i++)
@@ -175,14 +241,92 @@ void adjustMinutes(int delta)
     halfNotified = false;
 }
 
+void adjustMinutesWithFeedback(int delta)
+{
+    uint32_t before = durationSec;
+    adjustMinutes(delta);
+    if (durationSec != before)
+    {
+        beep((delta > 0) ? 2200 : 1800, 25);
+        vibratePattern(1, VIB_SHORT_MS);
+    }
+}
+
+void cycleNotificationMode()
+{
+    notificationMode = (NotificationMode)((notificationMode + 1) % NOTIFY_MODE_COUNT);
+}
+
+bool isTouchClicked()
+{
+    if (!M5.Touch.isEnabled())
+        return false;
+    return M5.Touch.getDetail().wasClicked();
+}
+
+void notifyHalfTime()
+{
+    if (notificationMode == NOTIFY_LOUD || notificationMode == NOTIFY_SOFT)
+    {
+        beep(2000, 90);
+        vibratePattern(1, VIB_SHORT_MS);
+    }
+    else if (notificationMode == NOTIFY_VIBRATE)
+    {
+        vibratePattern(1, VIB_SHORT_MS);
+    }
+}
+
+void notifyTimeUp()
+{
+    if (notificationMode == NOTIFY_LOUD || notificationMode == NOTIFY_SOFT)
+    {
+        for (int i = 0; i < 3; i++)
+        {
+            beep(2600, 120);
+            delay(140);
+        }
+    }
+
+    if (notificationMode == NOTIFY_LOUD || notificationMode == NOTIFY_SOFT || notificationMode == NOTIFY_VIBRATE)
+    {
+        vibratePattern(3, VIB_MEDIUM_MS);
+    }
+}
+
 void handleButtons()
 {
     if (uiMode == UI_SETTINGS)
     {
-        if (M5.BtnA.wasPressed() || M5.BtnC.wasPressed())
+        if (M5.BtnA.wasPressed())
         {
-            soundEnabled = !soundEnabled;
-            beep(soundEnabled ? 2400 : 1200, 40);
+            settingsCursor = (settingsCursor + SETTING_ITEM_COUNT - 1) % SETTING_ITEM_COUNT;
+            beep(1800, 25);
+        }
+
+        if (M5.BtnC.wasPressed())
+        {
+            settingsCursor = (settingsCursor + 1) % SETTING_ITEM_COUNT;
+            beep(2200, 25);
+        }
+
+        if (isTouchClicked())
+        {
+            if (settingsCursor == SETTING_SOUND)
+            {
+                soundEnabled = !soundEnabled;
+            }
+            else if (settingsCursor == SETTING_VIBRATION)
+            {
+                vibrationEnabled = !vibrationEnabled;
+            }
+            else if (settingsCursor == SETTING_NOTIFY_MODE)
+            {
+                cycleNotificationMode();
+            }
+
+            beep(2100, 35);
+            vibratePattern(1, VIB_SHORT_MS);
         }
 
         if (M5.BtnB.wasPressed())
@@ -204,24 +348,37 @@ void handleButtons()
     // Core2: A=-1分 / B=開始・停止 / C=+1分
     if (M5.BtnA.wasPressed())
     {
-        uint32_t before = durationSec;
-        adjustMinutes(-1);
-        if (durationSec != before)
-        {
-            beep(1800, 25);
-            vibratePattern(1, VIB_SHORT_MS);
-        }
+        adjustMinutesWithFeedback(-1);
+        lastHoldAdjustMsA = millis();
     }
 
     if (M5.BtnC.wasPressed())
     {
-        uint32_t before = durationSec;
-        adjustMinutes(1);
-        if (durationSec != before)
-        {
-            beep(2200, 25);
-            vibratePattern(1, VIB_SHORT_MS);
-        }
+        adjustMinutesWithFeedback(1);
+        lastHoldAdjustMsC = millis();
+    }
+
+    if (M5.BtnA.wasReleased())
+    {
+        lastHoldAdjustMsA = 0;
+    }
+
+    if (M5.BtnC.wasReleased())
+    {
+        lastHoldAdjustMsC = 0;
+    }
+
+    uint32_t now = millis();
+    if (M5.BtnA.pressedFor(BUTTON_HOLD_START_MS) && now - lastHoldAdjustMsA >= BUTTON_HOLD_REPEAT_MS)
+    {
+        adjustMinutesWithFeedback(-BUTTON_HOLD_STEP_MINUTES);
+        lastHoldAdjustMsA = now;
+    }
+
+    if (M5.BtnC.pressedFor(BUTTON_HOLD_START_MS) && now - lastHoldAdjustMsC >= BUTTON_HOLD_REPEAT_MS)
+    {
+        adjustMinutesWithFeedback(BUTTON_HOLD_STEP_MINUTES);
+        lastHoldAdjustMsC = now;
     }
 
     if (M5.BtnB.wasPressed())
@@ -316,7 +473,7 @@ void handleTouchMinuteAdjust()
     if (timerState == TIMER_RUNNING)
         return;
 
-    if (!M5.Touch.isEnabled() || M5.Touch.getCount() == 0)
+    if (!M5.Touch.isEnabled())
         return;
 
     auto td = M5.Touch.getDetail();
@@ -357,6 +514,19 @@ void handleTouchMinuteAdjust()
 #endif
 }
 
+uint16_t getDoneFlashColor()
+{
+    float phase = (float)(millis() % FLASH_CYCLE_MS) / (float)FLASH_CYCLE_MS;
+    float wave = (1.0f - cosf(phase * 2.0f * PI)) * 0.5f;
+    uint8_t level = (uint8_t)(wave * FLASH_MAX_BRIGHTNESS);
+
+    if (notificationMode == NOTIFY_LOUD || notificationMode == NOTIFY_VIBRATE)
+    {
+        return M5.Display.color565(level, 0, 0);
+    }
+    return M5.Display.color565(level, level, level);
+}
+
 void updateTimer()
 {
     if (timerState != TIMER_RUNNING)
@@ -376,19 +546,13 @@ void updateTimer()
         if (HALF_TIME_NOTIFY && !halfNotified && remainingSec <= durationSec / 2)
         {
             halfNotified = true;
-            beep(2000, 120);
-            vibratePattern(2, VIB_MEDIUM_MS);
+            notifyHalfTime();
         }
 
         if (remainingSec == 0)
         {
             timerState = TIMER_DONE;
-            for (int i = 0; i < 3; i++)
-            {
-                beep(2600, 120);
-                vibratePattern(1, VIB_LONG_MS);
-                delay(140);
-            }
+            notifyTimeUp();
         }
     }
 }
@@ -475,7 +639,14 @@ void drawStatus()
         break;
     case TIMER_RUNNING:
         label = "RUNNING";
-        c = colorRun;
+        if (remainingSec <= 300)
+        {
+            c = M5.Display.color565(255, 140, 50);
+        }
+        else
+        {
+            c = halfNotified ? M5.Display.color565(120, 210, 255) : colorRun;
+        }
         break;
     case TIMER_PAUSED:
         label = "PAUSED";
@@ -503,7 +674,30 @@ void drawMainTime()
     }
     else
     {
-        canvas.setTextColor(colorText, colorBg);
+        uint16_t mainColor = colorText;
+        if (timerState == TIMER_RUNNING)
+        {
+            if (remainingSec <= 30)
+            {
+                float phase = (float)(millis() % FLASH_CYCLE_MS) / (float)FLASH_CYCLE_MS;
+                float wave = (1.0f - cosf(phase * 2.0f * PI)) * 0.5f;
+                uint8_t r = (uint8_t)(120 + wave * 135);
+                uint8_t g = (uint8_t)(45 + wave * 85);
+                uint8_t b = (uint8_t)(20 + wave * 40);
+                mainColor = M5.Display.color565(r, g, b);
+            }
+            else if (remainingSec <= 60)
+            {
+                bool visible = ((millis() / SEGMENT_BLINK_INTERVAL_MS) % 2) == 0;
+                mainColor = visible ? M5.Display.color565(255, 120, 45) : colorDim;
+            }
+            else if (remainingSec <= 300)
+            {
+                mainColor = M5.Display.color565(255, 140, 50);
+            }
+        }
+
+        canvas.setTextColor(mainColor, colorBg);
         canvas.setTextSize(6);
         canvas.drawString(formatTime(remainingSec), SCREEN_WIDTH / 2, 105);
     }
@@ -519,7 +713,12 @@ void drawInfo()
     canvas.setTextSize(2);
 
     String info = String(durationSec / 60) + " min / " + String(percent) + "%";
-    canvas.drawString(info, SCREEN_WIDTH / 2, 182);
+    canvas.drawString(info, SCREEN_WIDTH / 2, 178);
+
+    canvas.setTextSize(1);
+    canvas.setTextColor(colorDim, colorBg);
+    String modeInfo = String("MODE: ") + String(notifyModeLabel());
+    canvas.drawString(modeInfo, SCREEN_WIDTH / 2, 196);
 }
 
 void drawHelp()
@@ -531,15 +730,15 @@ void drawHelp()
 
     if (uiMode == UI_SETTINGS)
     {
-        canvas.drawString("A/C:toggle sound   B:back", SCREEN_WIDTH / 2, 222);
+        canvas.drawString("A/C:item  tap:change  B:back", SCREEN_WIDTH / 2, 222);
     }
     else if (timerState == TIMER_READY)
     {
 #if USE_IMU_MINUTE_ADJUST
-        canvas.drawString("A:-1 C:+1 tap/swipe:+/-1 tilt:+/-1", SCREEN_WIDTH / 2, 214);
+        canvas.drawString("A/C tap:+/-1 hold:+/-3 touch:+/-1 tilt:+/-1", SCREEN_WIDTH / 2, 214);
         canvas.drawString("B:start   holdB:settings", SCREEN_WIDTH / 2, 226);
 #else
-        canvas.drawString("A:-1 C:+1 tap/swipe:+/-1", SCREEN_WIDTH / 2, 214);
+        canvas.drawString("A/C tap:+/-1 hold:+/-3 touch:+/-1", SCREEN_WIDTH / 2, 214);
         canvas.drawString("B:start   holdB:settings", SCREEN_WIDTH / 2, 226);
 #endif
     }
@@ -564,19 +763,31 @@ void drawSettings()
     canvas.setTextColor(colorText, colorBg);
 
     canvas.setTextSize(2);
-    canvas.drawString("SETTINGS", SCREEN_WIDTH / 2, 56);
+    canvas.drawString("SETTINGS", SCREEN_WIDTH / 2, 44);
 
-    canvas.setTextSize(3);
-    canvas.setTextColor(soundEnabled ? colorRun : colorDone, colorBg);
-    canvas.drawString(soundEnabled ? "SOUND: ON" : "SOUND: OFF", SCREEN_WIDTH / 2, 118);
+    canvas.setTextSize(2);
+    canvas.setTextColor((settingsCursor == SETTING_SOUND) ? colorRun : colorText, colorBg);
+    canvas.drawString(String((settingsCursor == SETTING_SOUND) ? "> " : "  ") + "SOUND: " + (soundEnabled ? "ON" : "OFF"), SCREEN_WIDTH / 2, 90);
+
+    canvas.setTextColor((settingsCursor == SETTING_VIBRATION) ? colorRun : colorText, colorBg);
+    canvas.drawString(String((settingsCursor == SETTING_VIBRATION) ? "> " : "  ") + "VIBE: " + (vibrationEnabled ? "ON" : "OFF"), SCREEN_WIDTH / 2, 120);
+
+    canvas.setTextColor((settingsCursor == SETTING_NOTIFY_MODE) ? colorRun : colorText, colorBg);
+    canvas.drawString(String((settingsCursor == SETTING_NOTIFY_MODE) ? "> " : "  ") + "MODE: " + notifyModeLabel(), SCREEN_WIDTH / 2, 150);
 
     canvas.setTextSize(1);
     canvas.setTextColor(colorDim, colorBg);
-    canvas.drawString("A/C toggle  B back", SCREEN_WIDTH / 2, 154);
+    canvas.drawString("A/C item  tap change  B back", SCREEN_WIDTH / 2, 184);
 }
 
 void drawDisplay()
 {
+    uint16_t savedBg = colorBg;
+    if (timerState == TIMER_DONE)
+    {
+        colorBg = getDoneFlashColor();
+    }
+
     canvas.fillScreen(colorBg);
 
     if (uiMode == UI_SETTINGS)
@@ -585,6 +796,7 @@ void drawDisplay()
         drawSettings();
         drawHelp();
         canvas.pushSprite(0, 0);
+        colorBg = savedBg;
         return;
     }
 
@@ -595,6 +807,7 @@ void drawDisplay()
     drawHelp();
 
     canvas.pushSprite(0, 0);
+    colorBg = savedBg;
 }
 
 void setup()
