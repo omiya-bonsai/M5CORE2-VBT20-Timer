@@ -24,11 +24,19 @@ enum NotificationMode
     NOTIFY_MODE_COUNT
 };
 
+enum UiLanguage
+{
+    LANG_EN,
+    LANG_JA,
+    LANG_COUNT
+};
+
 enum SettingsItem
 {
     SETTING_SOUND,
     SETTING_VIBRATION,
     SETTING_NOTIFY_MODE,
+    SETTING_LANGUAGE,
     SETTING_ITEM_COUNT
 };
 
@@ -37,6 +45,7 @@ M5Canvas canvas(&M5.Display);
 TimerState timerState = TIMER_READY;
 UiMode uiMode = UI_TIMER;
 NotificationMode notificationMode = NOTIFY_LOUD;
+UiLanguage uiLanguage = UI_LANGUAGE_DEFAULT_JA ? LANG_JA : LANG_EN;
 uint8_t settingsCursor = SETTING_SOUND;
 
 uint32_t durationSec = DEFAULT_TIMER_MINUTES * 60;
@@ -57,6 +66,23 @@ uint16_t colorReady, colorRun, colorPause, colorDone;
 
 const char *notifyModeLabel()
 {
+    if (uiLanguage == LANG_JA)
+    {
+        switch (notificationMode)
+        {
+        case NOTIFY_LOUD:
+            return "大きめ";
+        case NOTIFY_SOFT:
+            return "やさしめ";
+        case NOTIFY_SILENT:
+            return "消音";
+        case NOTIFY_VIBRATE:
+            return "バイブ";
+        default:
+            return "大きめ";
+        }
+    }
+
     switch (notificationMode)
     {
     case NOTIFY_LOUD:
@@ -70,6 +96,47 @@ const char *notifyModeLabel()
     default:
         return "LOUD";
     }
+}
+
+const char *tr(const char *en, const char *ja)
+{
+    return (uiLanguage == LANG_JA) ? ja : en;
+}
+
+const char *langLabel()
+{
+    return (uiLanguage == LANG_JA) ? "JA" : "EN";
+}
+
+void setUiFontByScale(uint8_t enScale)
+{
+    if (uiLanguage == LANG_JA)
+    {
+        if (enScale >= 5)
+        {
+            canvas.setFont(&fonts::lgfxJapanGothic_24);
+        }
+        else if (enScale >= 2)
+        {
+            canvas.setFont(&fonts::lgfxJapanGothic_16);
+        }
+        else
+        {
+            canvas.setFont(&fonts::lgfxJapanGothic_12);
+        }
+        canvas.setTextSize(1);
+    }
+    else
+    {
+        canvas.setFont(&fonts::Font0);
+        canvas.setTextSize(enScale);
+    }
+}
+
+void setNumericFont(uint8_t scale)
+{
+    canvas.setFont(&fonts::Font0);
+    canvas.setTextSize(scale);
 }
 
 bool isSoundNotifyEnabled()
@@ -323,6 +390,10 @@ void handleButtons()
             else if (settingsCursor == SETTING_NOTIFY_MODE)
             {
                 cycleNotificationMode();
+            }
+            else if (settingsCursor == SETTING_LANGUAGE)
+            {
+                uiLanguage = (UiLanguage)((uiLanguage + 1) % LANG_COUNT);
             }
 
             beep(2100, 35);
@@ -626,7 +697,7 @@ void drawBarSegments()
 void drawStatus()
 {
     canvas.setTextDatum(middle_center);
-    canvas.setTextSize(2);
+    setUiFontByScale(2);
 
     String label;
     uint16_t c;
@@ -634,11 +705,11 @@ void drawStatus()
     switch (timerState)
     {
     case TIMER_READY:
-        label = "READY";
+        label = tr("READY", "準備OK");
         c = colorReady;
         break;
     case TIMER_RUNNING:
-        label = "RUNNING";
+        label = tr("RUNNING", "実行中");
         if (remainingSec <= 300)
         {
             c = M5.Display.color565(255, 140, 50);
@@ -649,11 +720,11 @@ void drawStatus()
         }
         break;
     case TIMER_PAUSED:
-        label = "PAUSED";
+        label = tr("PAUSED", "一時停止");
         c = colorPause;
         break;
     case TIMER_DONE:
-        label = "TIME UP";
+        label = tr("TIME UP", "終了");
         c = colorDone;
         break;
     }
@@ -669,8 +740,8 @@ void drawMainTime()
     if (timerState == TIMER_DONE)
     {
         canvas.setTextColor(colorDone, colorBg);
-        canvas.setTextSize(5);
-        canvas.drawString("DONE", SCREEN_WIDTH / 2, 100);
+        setUiFontByScale(5);
+        canvas.drawString(tr("DONE", "おわり"), SCREEN_WIDTH / 2, 100);
     }
     else
     {
@@ -698,7 +769,7 @@ void drawMainTime()
         }
 
         canvas.setTextColor(mainColor, colorBg);
-        canvas.setTextSize(6);
+        setNumericFont(6);
         canvas.drawString(formatTime(remainingSec), SCREEN_WIDTH / 2, 105);
     }
 }
@@ -707,52 +778,55 @@ void drawInfo()
 {
     float ratio = remainRatio();
     int percent = round(ratio * 100);
+    int batteryLevel = M5.Power.getBatteryLevel();
 
     canvas.setTextDatum(middle_center);
     canvas.setTextColor(colorText, colorBg);
-    canvas.setTextSize(2);
+    setUiFontByScale(2);
 
-    String info = String(durationSec / 60) + " min / " + String(percent) + "%";
+    String info = String(durationSec / 60) + tr(" min / ", " 分 / ") + String(percent) + "%";
     canvas.drawString(info, SCREEN_WIDTH / 2, 178);
 
-    canvas.setTextSize(1);
+    setUiFontByScale(1);
     canvas.setTextColor(colorDim, colorBg);
-    String modeInfo = String("MODE: ") + String(notifyModeLabel());
-    canvas.drawString(modeInfo, SCREEN_WIDTH / 2, 196);
+    String modeInfo = String(tr("MODE: ", "モード: ")) + String(notifyModeLabel());
+    String batteryInfo = String(tr("BAT: ", "電池: ")) + ((batteryLevel >= 0) ? String(batteryLevel) + "%" : String("--"));
+    canvas.drawString(modeInfo, SCREEN_WIDTH / 2, 192);
+    canvas.drawString(batteryInfo, SCREEN_WIDTH / 2, 204);
 }
 
 void drawHelp()
 {
 #if DRAW_HELP_TEXT
     canvas.setTextDatum(middle_center);
-    canvas.setTextSize(1);
+    setUiFontByScale(1);
     canvas.setTextColor(colorDim, colorBg);
 
     if (uiMode == UI_SETTINGS)
     {
-        canvas.drawString("A/C:item  tap:change  B:back", SCREEN_WIDTH / 2, 222);
+        // drawSettings() already renders setting controls; avoid duplicate text here.
     }
     else if (timerState == TIMER_READY)
     {
 #if USE_IMU_MINUTE_ADJUST
-        canvas.drawString("A/C tap:+/-1 hold:+/-3 touch:+/-1 tilt:+/-1", SCREEN_WIDTH / 2, 214);
-        canvas.drawString("B:start   holdB:settings", SCREEN_WIDTH / 2, 226);
+        // canvas.drawString("A/C tap:+/-1 hold:+/-3 touch:+/-1 tilt:+/-1", SCREEN_WIDTH / 2, 214);
+        canvas.drawString(tr("B:start   holdB:settings", "B:開始   B長押し:設定"), SCREEN_WIDTH / 2, 222);
 #else
-        canvas.drawString("A/C tap:+/-1 hold:+/-3 touch:+/-1", SCREEN_WIDTH / 2, 214);
-        canvas.drawString("B:start   holdB:settings", SCREEN_WIDTH / 2, 226);
+        // canvas.drawString("A/C tap:+/-1 hold:+/-3 touch:+/-1", SCREEN_WIDTH / 2, 214);
+        canvas.drawString(tr("B:start   holdB:settings", "B:開始   B長押し:設定"), SCREEN_WIDTH / 2, 222);
 #endif
     }
     else if (timerState == TIMER_RUNNING)
     {
-        canvas.drawString("B:pause", SCREEN_WIDTH / 2, 222);
+        canvas.drawString(tr("B:pause", "B:一時停止"), SCREEN_WIDTH / 2, 222);
     }
     else if (timerState == TIMER_PAUSED)
     {
-        canvas.drawString("B:resume   hold B:reset", SCREEN_WIDTH / 2, 222);
+        canvas.drawString(tr("B:resume   hold B:reset", "B:再開   B長押し:リセット"), SCREEN_WIDTH / 2, 222);
     }
     else
     {
-        canvas.drawString("B:reset", SCREEN_WIDTH / 2, 222);
+        canvas.drawString(tr("B:reset", "B:リセット"), SCREEN_WIDTH / 2, 222);
     }
 #endif
 }
@@ -762,22 +836,25 @@ void drawSettings()
     canvas.setTextDatum(middle_center);
     canvas.setTextColor(colorText, colorBg);
 
-    canvas.setTextSize(2);
-    canvas.drawString("SETTINGS", SCREEN_WIDTH / 2, 44);
+    setUiFontByScale(2);
+    canvas.drawString(tr("SETTINGS", "設定"), SCREEN_WIDTH / 2, 44);
 
-    canvas.setTextSize(2);
+    setUiFontByScale(2);
     canvas.setTextColor((settingsCursor == SETTING_SOUND) ? colorRun : colorText, colorBg);
-    canvas.drawString(String((settingsCursor == SETTING_SOUND) ? "> " : "  ") + "SOUND: " + (soundEnabled ? "ON" : "OFF"), SCREEN_WIDTH / 2, 90);
+    canvas.drawString(String((settingsCursor == SETTING_SOUND) ? "> " : "  ") + tr("SOUND: ", "音: ") + (soundEnabled ? "ON" : "OFF"), SCREEN_WIDTH / 2, 84);
 
     canvas.setTextColor((settingsCursor == SETTING_VIBRATION) ? colorRun : colorText, colorBg);
-    canvas.drawString(String((settingsCursor == SETTING_VIBRATION) ? "> " : "  ") + "VIBE: " + (vibrationEnabled ? "ON" : "OFF"), SCREEN_WIDTH / 2, 120);
+    canvas.drawString(String((settingsCursor == SETTING_VIBRATION) ? "> " : "  ") + tr("VIBE: ", "振動: ") + (vibrationEnabled ? "ON" : "OFF"), SCREEN_WIDTH / 2, 110);
 
     canvas.setTextColor((settingsCursor == SETTING_NOTIFY_MODE) ? colorRun : colorText, colorBg);
-    canvas.drawString(String((settingsCursor == SETTING_NOTIFY_MODE) ? "> " : "  ") + "MODE: " + notifyModeLabel(), SCREEN_WIDTH / 2, 150);
+    canvas.drawString(String((settingsCursor == SETTING_NOTIFY_MODE) ? "> " : "  ") + tr("MODE: ", "通知: ") + notifyModeLabel(), SCREEN_WIDTH / 2, 136);
 
-    canvas.setTextSize(1);
+    canvas.setTextColor((settingsCursor == SETTING_LANGUAGE) ? colorRun : colorText, colorBg);
+    canvas.drawString(String((settingsCursor == SETTING_LANGUAGE) ? "> " : "  ") + tr("LANG: ", "言語: ") + langLabel(), SCREEN_WIDTH / 2, 162);
+
+    setUiFontByScale(1);
     canvas.setTextColor(colorDim, colorBg);
-    canvas.drawString("A/C item  tap change  B back", SCREEN_WIDTH / 2, 184);
+    canvas.drawString(tr("A/C item  tap change  B back", "A/C項目  タップ変更  B戻る"), SCREEN_WIDTH / 2, 188);
 }
 
 void drawDisplay()
